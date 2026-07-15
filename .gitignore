@@ -1,5 +1,12 @@
 # Datasets (large, GBIF-sourced/regeneratable via scripts/01, 03, 06)
-data/
+# Labels are kept - small text files, real annotation work.
+data/*
+!data/labels_yolo_seg/
+!data/dataset/
+
+data/dataset/*
+!data/dataset/labels/
+
 rov_photos/
 
 # Pretrained base checkpoints (auto-downloaded by ultralytics)
