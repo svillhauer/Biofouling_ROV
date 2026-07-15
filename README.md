@@ -21,23 +21,6 @@ archived, not deleted, in `data/labels_yolo_seg_archived_hp/` in case it's
 ever worth reintroducing as a class with clearer evidence it's present at
 the site.)
 
-## Why multi-class, not a single "biofouling present" class
-
-All four organisms are trained as **real, separate classes** rather than
-collapsed into one generic "biofouling" label. Presence/absence still falls
-straight out of this for free — "is there biofouling on this wall" is just
-"did *any* class fire" — but you additionally get species identity, which
-matters here since two of these (Rugulopteryx and Asparagopsis) are
-specific invasive species the original project was built around
-distinguishing from each other. Collapsing to one class would throw that
-away for no benefit on the presence/absence question.
-
-The cost: each class needs its own labeled data before it's reliable, same
-as the original project's Rugulopteryx/Asparagopsis pair needed ~150-200
-labeled images each before specificity was trustworthy. Expect the two
-brand-new species (2-3) to be noisy at first - that's normal, not a sign
-anything is wrong, and improves the same way it did before: more labels.
-
 ## Status as of setup
 
 - **Classes 0 and 1** (Rugulopteryx, Asparagopsis) start with the labeled
