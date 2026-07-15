@@ -1,0 +1,22 @@
+# Datasets (large, GBIF-sourced/regeneratable via scripts/01, 03, 06)
+data/
+rov_photos/
+
+# Pretrained base checkpoints (auto-downloaded by ultralytics)
+yolo11n-seg.pt
+yolo11s-seg.pt
+yolo26n.pt
+sam_b.pt
+
+# Misc local test assets
+fish.mp4
+
+# Training runs - keep only train-4
+runs/*
+!runs/segment
+runs/segment/*
+!runs/segment/train-4
+
+# Python
+scripts/__pycache__/
+*.pyc

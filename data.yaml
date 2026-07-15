@@ -1,0 +1,10 @@
+path: data/dataset
+train: images/train
+val: images/val
+test: images/test
+
+names:
+  0: rugulopteryx_okamurae
+  1: asparagopsis_armata
+  2: botrylloides_violaceus
+  3: hildenbrandia_rubra
