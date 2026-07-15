@@ -22,6 +22,8 @@ just "did any class fire").
 pip install ultralytics opencv-python numpy pandas pyyaml requests tqdm pillow matplotlib
 ```
 
+Script 08 also needs `bluerobotics-ping` (`pip install bluerobotics-ping`) to talk to the echosounder.
+
 ## Workflow
 
 ### 1. Extract images from a GBIF download
@@ -114,6 +116,27 @@ Find the stream URL in the BlueOS web UI under Video Manager: set up an
 RTSP (or other cv2-readable) output for the camera you want, then pass
 that URL as `--source`.
 
+### 8. Live scan with percent coverage (echosounder)
+
+```
+python scripts/08_scan_with_coverage.py --source rtsp://192.168.2.2:8554/video \
+    --ping-udp 192.168.2.2:9092 --hfov 80 --vfov 64
+```
+
+Same as script 07, but reads range from a Blue Robotics Ping1D echosounder
+(directly via `brping`, over `--ping-udp host:port` or `--ping-serial
+device`) and logs a percent-of-frame coverage figure for every frame to a
+second CSV (`--coverage-log`, default `runs/coverage_log.csv`). Percent
+coverage itself doesn't need range to compute, it's already a fraction of
+whatever's in view; range is used to also convert that into an absolute
+area in m² if you pass `--hfov`/`--vfov` (your camera's field of view in
+degrees), and is logged either way so distant, less-reliable frames can be
+filtered out later.
+
+This gives one coverage number per frame, not a whole-wall survey figure:
+overlapping frames from the same pass aren't de-duplicated, so summing
+`covered_area_m2` across frames will double-count anything seen twice.
+
 ## Layout
 
 ```
@@ -130,6 +153,7 @@ scripts/
   05_scan_for_biofouling.py
   06_degrade_domain_match.py
   07_live_scan.py
+  08_scan_with_coverage.py
 data.yaml   dataset config, 4 classes
 runs/       training outputs
 ```
