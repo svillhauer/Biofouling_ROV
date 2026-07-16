@@ -24,6 +24,10 @@ runs/*
 runs/segment/*
 !runs/segment/train-4
 
+# Live-scan detection logs worth keeping
+!runs/live_scan_ws_log_20260716_154434.csv
+!runs/live_scan_ws_log_20260716_153522.csv
+
 # Python
 scripts/__pycache__/
 *.pyc
