@@ -226,19 +226,26 @@ async def main_async(args):
 
 
 def main():
+    # One timestamp per run, shared by the log and the recording defaults, so a
+    # session's CSV and video are paired by construction - never lands back in
+    # the same file as a previous run's differently-shaped data.
+    session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+
     ap = argparse.ArgumentParser()
     ap.add_argument("--source", default=DEFAULT_SOURCE,
                      help="RTSP URL from BlueOS's Video Manager, or a webcam index (e.g. 0) for testing")
     ap.add_argument("--weights", default=str(ROOT / "runs/segment/train-4/weights/best.pt"))
     ap.add_argument("--conf", type=float, default=0.25)
-    ap.add_argument("--log", default=str(ROOT / "runs" / "live_scan_ws_log.csv"))
+    ap.add_argument("--log", default=str(ROOT / "runs" / f"live_scan_ws_log_{session_id}.csv"),
+                     help="CSV detection log. Defaults to a timestamped file per run (matches --record's default).")
     ap.add_argument("--ws-host", default="0.0.0.0")
     ap.add_argument("--ws-port", type=int, default=8765)
     ap.add_argument("--ws-path", default="/api/v1/detections/ws",
                      help="Cosmetic only - the server accepts connections on any path at this host:port.")
-    ap.add_argument("--record", nargs="?", const=str(ROOT / "runs" / "recordings" / f"live_scan_{datetime.now():%Y%m%d_%H%M%S}.mp4"),
+    ap.add_argument("--record", nargs="?", const=str(ROOT / "runs" / "recordings" / f"live_scan_{session_id}.mp4"),
                      help="Save an annotated (boxes/masks drawn) MP4 of the session. "
-                          "Pass a path, or use bare --record for a timestamped default under runs/recordings/.")
+                          "Pass a path, or use bare --record for a timestamped default under runs/recordings/ "
+                          "(same timestamp as the default --log file).")
     ap.add_argument("--record-fps", type=float, default=25.0,
                      help="Playback fps for the saved video (doesn't need to match live processing rate).")
     args = ap.parse_args()
