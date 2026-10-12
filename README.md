@@ -54,8 +54,6 @@ What it answers, live, during the dive:
 - **Leakage-safe evaluation.** Splits are grouped by GBIF occurrence record and stratified per class, so near-duplicate photos never straddle train/test and low-data species still get val/test coverage.
 - **SAM-assisted labelling tool.** Point-and-click Segment Anything labelling with multi-instance and multi-class support, undo/back navigation and autosave. It was used to produce the dataset's masks.
 - **Vehicle-integrated runtime.** Topside GPU inference against the BlueOS RTSP stream (TCP transport for tether reliability), a versioned WebSocket protocol for the operator console's AI overlay, and Ping1D range fusion for metric coverage.
-- **Engineering hygiene.** Installable package, unit-tested core logic, ruff-linted, CI on every push.
-
 ## System architecture
 
 ```mermaid
