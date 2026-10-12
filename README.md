@@ -22,13 +22,23 @@ A YOLO11 instance-segmentation pipeline that finds and identifies invasive fouli
 ---
 
 > [!NOTE]
-> **Project context.** This repository is the computer-vision subsystem of *Autonomous Detection of Invasive Biofouling*, Team 5's project at the **2026 Marine Robotics Summer School** (MIT Program · University of the Azores, Horta, Faial). The full concept of operations runs from **Identify** (AIS-based screening of incoming vessels) to **Inspect** (an echosounder-standoff ROV images the hull while this model flags invasive species) to **Act** (brush-head sampling and removal). Team: Francisco Silva, Kaitlyn Barros, Sarah Villhauer, Tiago Conceição.
+> Designed and built during the **2026 Marine Robotics Summer School** (MIT Program · University of the Azores) in Horta, Faial, and field-tested on ROV footage from the Horta harbour.
 
-## Why
+## Why the Azores
 
-Biofouling on harbor infrastructure and hulls is usually surveyed by divers or by people scrubbing through hours of ROV video afterward. Knowing *that* something is growing isn't enough. Invasive species such as *Rugulopteryx okamurae* or *Botrylloides violaceus* need a different response from native encrusting algae, so the useful output is **which organism, where, and how much**.
+**Horta is a transatlantic crossroads.** Faial is one of the main stopovers on North Atlantic sailing routes, and the Horta marina hosts vessels from all over the world. Every visiting hull can carry organisms from its last port, and island ecosystems like the Azores' are especially exposed to species that arrive this way.
 
-This project answers that live, during the dive:
+**The hull pathway is barely monitored.** Ballast water is regulated by international agreement, but hull biofouling is managed mostly through voluntary guidance. Models of how species spread on ships have little field data to work with, because almost none is collected at the hull.
+
+**The threat is already here.** The invasive brown alga *Rugulopteryx okamurae* has been reported on São Miguel and Faial, where mass strandings smother beaches and its decomposition harms benthic habitats, fisheries and tourism.
+
+That shaped the design:
+
+- **Species-level output, not "fouling yes/no."** An invasive alga and a native crust need different responses, so the model names the organism. *Rugulopteryx okamurae* is a first-class target.
+- **Built for local water, without local training data.** No labelled Azorean dataset exists, so training starts from global GBIF photos, and a domain-adaptation step makes the model work in turbid harbour footage ([details](#closing-the-domain-gap)).
+- **Every dive produces data.** Detections are logged with species, confidence, timestamps and measured coverage, producing the kind of hull-level field observations the spread models lack.
+
+What it answers, live, during the dive:
 
 | Question | How it's answered |
 |---|---|
