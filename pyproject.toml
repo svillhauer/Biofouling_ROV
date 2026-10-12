@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "biofouling-rov"
+version = "0.1.0"
+description = "Real-time species-level biofouling segmentation for ROV hull and sea-wall inspection"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Sarah Villhauer" }]
+dependencies = [
+    "ultralytics>=8.3",
+    "opencv-python",
+    "numpy",
+    "pandas",
+    "pyyaml",
+    "pillow",
+    "matplotlib",
+    "requests",
+    "tqdm",
+]
+
+[project.optional-dependencies]
+# Topside live-inference extras: Ping1D echosounder + operator-console WebSocket
+rov = ["bluerobotics-ping", "websockets>=13"]
+dev = ["pytest", "ruff"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["B905"]  # zip(strict=) is noise for same-source tensor columns
+
+[tool.ruff.lint.per-file-ignores]
+# Scripts set backend/env options (matplotlib.use, OPENCV_FFMPEG_*) before importing
+"scripts/**" = ["E402"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["biofouling"]

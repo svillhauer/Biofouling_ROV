@@ -3,7 +3,7 @@
 Real-time biofouling scan against a live video stream (e.g. BlueOS's RTSP
 feed), run topside on a GPU machine rather than on the ROV's own companion
 computer - no model export/downsizing needed, same weights as
-05_scan_for_biofouling.py.
+scan_images.py.
 
 Shows a live annotated preview window (boxes/masks + confidence, like the
 photo/video scans) and appends every detection to a CSV log (timestamp,
@@ -16,8 +16,8 @@ that URL as --source. Use --source 0 (or another webcam index) to test the
 script against a local webcam first if you don't have the ROV connected.
 
 Usage:
-    python scripts/07_live_scan.py --source rtsp://192.168.2.2:8554/video
-    python scripts/07_live_scan.py --source 0 --weights runs/segment/train-4/weights/best.pt
+    python scripts/inference/live_scan.py --source rtsp://192.168.2.2:8554/video
+    python scripts/inference/live_scan.py --source 0   # local webcam smoke test
 Press 'q' in the preview window (or Ctrl+C in the terminal) to stop.
 """
 import argparse
@@ -28,16 +28,16 @@ from pathlib import Path
 import cv2
 from ultralytics import YOLO
 
-ROOT = Path(__file__).resolve().parent.parent
+from biofouling.paths import DEFAULT_WEIGHTS, RUNS_DIR
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--source", required=True,
                      help="RTSP URL from BlueOS's Video Manager, or a webcam index (e.g. 0) for testing")
-    ap.add_argument("--weights", default=str(ROOT / "runs/segment/train-4/weights/best.pt"))
+    ap.add_argument("--weights", default=str(DEFAULT_WEIGHTS))
     ap.add_argument("--conf", type=float, default=0.25)
-    ap.add_argument("--log", default=str(ROOT / "runs" / "live_scan_log.csv"))
+    ap.add_argument("--log", default=str(RUNS_DIR / "live_scan_log.csv"))
     ap.add_argument("--no-display", action="store_true",
                      help="Skip the live preview window - log detections only (for a headless run)")
     args = ap.parse_args()

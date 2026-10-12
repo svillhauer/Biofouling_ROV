@@ -5,50 +5,27 @@ every StillImage into data/images/<out-subdir>/, writing a metadata CSV
 alongside it. Use --out-subdir to keep multiple species separate.
 
 Usage:
-    python scripts/01_extract_gbif_images.py /path/to/gbif_download.zip
-    python scripts/01_extract_gbif_images.py /path/to/already_unzipped_folder
-    python scripts/01_extract_gbif_images.py aa --out-subdir aa   # second species
+    python scripts/data/extract_gbif_images.py /path/to/gbif_download.zip
+    python scripts/data/extract_gbif_images.py /path/to/already_unzipped_folder
+    python scripts/data/extract_gbif_images.py aa --out-subdir aa   # second species
 """
-import sys
+import argparse
 import csv
-import re
 import hashlib
 import zipfile
-import argparse
-from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 
 import pandas as pd
 import requests
 from tqdm import tqdm
 
-ROOT = Path(__file__).resolve().parent.parent
-
-# Some GBIF multimedia.txt exports are ragged: a subset of rows (often from
-# one particular source dataset) carry extra fields not declared in the
-# header - e.g. an inserted datasetKey - which throws off column position for
-# just those rows, and can even make pandas.read_csv silently absorb the
-# extra leading fields into a MultiIndex. Rather than trust column position
-# at all, recover the image URL and gbifID by pattern-matching every raw
-# field in the row, regardless of where it landed.
-IMAGE_URL_RE = re.compile(r"https?://\S+\.(?:jpg|jpeg|png|tif|tiff)\b", re.IGNORECASE)
-GBIF_ID_RE = re.compile(r"^\d{6,12}$")
-
-
-def recover_url_and_id(fields, fallback_id: str):
-    """Find an image URL and gbifID anywhere in a raw TSV row, tolerant of column shift."""
-    url = None
-    for v in fields:
-        m = IMAGE_URL_RE.search(v)
-        if m:
-            url = m.group(0)
-            break
-    gbif_id = next((v for v in fields if GBIF_ID_RE.match(v)), fallback_id)
-    return url, gbif_id
+from biofouling.gbif import recover_url_and_id
+from biofouling.paths import DATA_DIR, IMAGES_DIR
 
 
 def unpack(zip_path: Path, tag: str) -> Path:
-    raw_dir = ROOT / "data" / "raw_gbif" / tag
+    raw_dir = DATA_DIR / "raw_gbif" / tag
     raw_dir.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(zip_path) as zf:
         zf.extractall(raw_dir)
@@ -57,7 +34,7 @@ def unpack(zip_path: Path, tag: str) -> Path:
 
 def load_multimedia_rows(raw_dir: Path):
     """Read multimedia.txt as raw rows (list of field lists), bypassing pandas'
-    column alignment - see the note on ragged rows above."""
+    column alignment - see the note on ragged rows in biofouling.gbif."""
     for name in ("multimedia.txt", "Multimedia.txt", "verbatim_multimedia.txt"):
         p = raw_dir / name
         if p.exists():
@@ -87,7 +64,7 @@ def main():
                     help="Subfolder under data/images/ to save into - use a distinct name per species")
     args = ap.parse_args()
 
-    images_dir = ROOT / "data" / "images" / args.out_subdir
+    images_dir = IMAGES_DIR / args.out_subdir
     meta_csv = images_dir / "metadata.csv"
 
     if args.zip_path.is_dir():

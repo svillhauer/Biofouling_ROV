@@ -2,7 +2,7 @@
 """
 Real-time biofouling scan that publishes detections over WebSocket for the
 blueos-standoff-controller operator console AI overlay, instead of (or in
-addition to) the local cv2 preview window in 07_live_scan.py. Same weights,
+addition to) the local cv2 preview window in live_scan.py. Same weights,
 same inference loop - this just speaks the console's wire protocol
 (protocol_version "1.0", messages: hello/heartbeat/detections) on
 ws://<host>:<port>/api/v1/detections/ws so static/js/ai-overlay.js can render
@@ -14,8 +14,8 @@ with --source for a different stream, or --source 0 (or another webcam
 index) to test the WebSocket pipeline without the ROV connected.
 
 Usage:
-    python scripts/09_live_scan_ws.py
-    python scripts/09_live_scan_ws.py --source 0   # webcam smoke test
+    python scripts/inference/live_scan_ws.py
+    python scripts/inference/live_scan_ws.py --source 0   # webcam smoke test
 
 Then point blueos-standoff-controller at it (already the config.py default):
     AI_ENABLED=true
@@ -42,7 +42,9 @@ import cv2
 import websockets
 from ultralytics import YOLO
 
-ROOT = Path(__file__).resolve().parent.parent
+from biofouling.geometry import polygon_area_px
+from biofouling.paths import DEFAULT_WEIGHTS, RUNS_DIR
+
 PROTOCOL_VERSION = "1.0"
 DEFAULT_SOURCE = "rtsp://192.168.2.2:8554/video_udp_stream_0"
 HEARTBEAT_INTERVAL_S = 1.0
@@ -87,22 +89,9 @@ class Broadcaster:
                 self.clients.discard(ws)
 
 
-def polygon_area_px(points_norm, image_width, image_height):
-    """Shoelace formula on normalized [0,1] polygon points, scaled to pixel area."""
-    if not points_norm or len(points_norm) < 3:
-        return None
-    area = 0.0
-    n = len(points_norm)
-    for i in range(n):
-        x1n, y1n = points_norm[i]
-        x2n, y2n = points_norm[(i + 1) % n]
-        area += x1n * y2n - x2n * y1n
-    return abs(area) / 2 * image_width * image_height
-
-
 def run_inference_loop(model, source, conf, broadcaster: Broadcaster, log_writer, log_file,
                         stop_event, record_path=None, record_fps=25):
-    """Blocking loop (runs in a background thread) - mirrors 07_live_scan.py's
+    """Blocking loop (runs in a background thread) - mirrors live_scan.py's
     predict(stream=True) loop but broadcasts each frame instead of cv2.imshow."""
     frame_id = 0
     window_start = time.time()
@@ -148,7 +137,8 @@ def run_inference_loop(model, source, conf, broadcaster: Broadcaster, log_writer
                         mask_area = polygon_area_px(points, image_width, image_height)
                     detections.append(det)
                     log_writer.writerow([
-                        datetime.now().isoformat(timespec="seconds"), frame_id, det["class_name"], f"{det['confidence']:.3f}",
+                        datetime.now().isoformat(timespec="seconds"), frame_id,
+                        det["class_name"], f"{det['confidence']:.3f}",
                         round(x1, 1), round(y1, 1), round(x2, 1), round(y2, 1),
                         image_width, image_height,
                         round(mask_area, 1) if mask_area is not None else "",
@@ -195,7 +185,8 @@ async def main_async(args):
     log_file = open(log_path, "a", newline="")
     log_writer = csv.writer(log_file)
     if is_new_log:
-        log_writer.writerow(["timestamp", "frame_id", "species", "confidence", "x1", "y1", "x2", "y2", "image_width", "image_height", "mask_area_px2"])
+        log_writer.writerow(["timestamp", "frame_id", "species", "confidence", "x1", "y1", "x2", "y2",
+                             "image_width", "image_height", "mask_area_px2"])
 
     stop_event = threading.Event()
     record_path = Path(args.record) if args.record else None
@@ -234,15 +225,15 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--source", default=DEFAULT_SOURCE,
                      help="RTSP URL from BlueOS's Video Manager, or a webcam index (e.g. 0) for testing")
-    ap.add_argument("--weights", default=str(ROOT / "runs/segment/train-4/weights/best.pt"))
+    ap.add_argument("--weights", default=str(DEFAULT_WEIGHTS))
     ap.add_argument("--conf", type=float, default=0.25)
-    ap.add_argument("--log", default=str(ROOT / "runs" / f"live_scan_ws_log_{session_id}.csv"),
+    ap.add_argument("--log", default=str(RUNS_DIR / f"live_scan_ws_log_{session_id}.csv"),
                      help="CSV detection log. Defaults to a timestamped file per run (matches --record's default).")
     ap.add_argument("--ws-host", default="0.0.0.0")
     ap.add_argument("--ws-port", type=int, default=8765)
     ap.add_argument("--ws-path", default="/api/v1/detections/ws",
                      help="Cosmetic only - the server accepts connections on any path at this host:port.")
-    ap.add_argument("--record", nargs="?", const=str(ROOT / "runs" / "recordings" / f"live_scan_{session_id}.mp4"),
+    ap.add_argument("--record", nargs="?", const=str(RUNS_DIR / "recordings" / f"live_scan_{session_id}.mp4"),
                      help="Save an annotated (boxes/masks drawn) MP4 of the session. "
                           "Pass a path, or use bare --record for a timestamped default under runs/recordings/ "
                           "(same timestamp as the default --log file).")

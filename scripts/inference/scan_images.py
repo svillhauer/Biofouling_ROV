@@ -8,22 +8,24 @@ this wall" tool: presence/absence falls straight out of a multi-class model
 for that question.
 
 Usage:
-    python scripts/05_scan_for_biofouling.py --weights runs/segment/train/weights/best.pt --source rov_photos --save
+    python scripts/inference/scan_images.py --source rov_photos --save
 """
 import argparse
 import shutil
 import tempfile
-from pathlib import Path
 from collections import defaultdict
+from pathlib import Path
 
 import matplotlib
+
 matplotlib.use("Agg")  # headless: never try a GUI backend, only ever save to file
 
 import yaml
 from PIL import Image
 from ultralytics import YOLO
 
-ROOT = Path(__file__).resolve().parent.parent
+from biofouling.paths import DATA_YAML, DEFAULT_WEIGHTS, RUNS_DIR
+
 IMG_EXTS = (".jpg", ".jpeg", ".png")
 
 
@@ -67,14 +69,14 @@ def _too_big(p: Path, max_dim: int) -> bool:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--weights", required=True, help="Path to trained best.pt")
+    ap.add_argument("--weights", default=str(DEFAULT_WEIGHTS), help="Path to trained best.pt")
     ap.add_argument("--source", required=True, help="Folder of images (or a video/single image)")
     ap.add_argument("--conf", type=float, default=0.25)
     ap.add_argument("--save", action="store_true", help="Save annotated images")
     ap.add_argument("--name", default="biofouling_scan")
     args = ap.parse_args()
 
-    data_yaml = yaml.safe_load((ROOT / "data.yaml").read_text())
+    data_yaml = yaml.safe_load(DATA_YAML.read_text())
     class_names = data_yaml["names"]
 
     source = Path(args.source)
@@ -85,7 +87,7 @@ def main():
         source=str(predict_source),
         conf=args.conf,
         save=args.save,
-        project=str(ROOT / "runs" / "segment"),
+        project=str(RUNS_DIR / "segment"),
         name=args.name,
         stream=True,
         verbose=False,
@@ -131,7 +133,7 @@ def main():
 
     if args.save:
         actual_save_dir = getattr(getattr(model, "predictor", None), "save_dir", None)
-        print(f"\nAnnotated images saved under {actual_save_dir or (ROOT / 'runs' / 'segment' / args.name)}/")
+        print(f"\nAnnotated images saved under {actual_save_dir or (RUNS_DIR / 'segment' / args.name)}/")
 
 
 if __name__ == "__main__":

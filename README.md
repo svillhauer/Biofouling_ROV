@@ -1,159 +1,285 @@
-# Biofouling ROV Detector
+<div align="center">
 
-YOLOv11 instance segmentation for detecting biofouling organisms on a harbor
-sea wall in ROV video, and identifying which organism is present.
+# Biofouling ROV
 
-## Classes
+**Real-time, species-level biofouling segmentation for underwater ROV inspection.**
 
-Trained as four separate classes, not one generic "biofouling" label. This
-gives species identity in addition to plain presence/absence (presence is
-just "did any class fire").
+A YOLO11 instance-segmentation pipeline that finds and identifies invasive fouling organisms in a live ROV camera feed. It runs topside next to BlueOS, streams detections to an operator console over WebSocket, and turns masks into percent-coverage and m² estimates using a Ping1D echosounder.
 
-```
-0: rugulopteryx_okamurae   (invasive brown alga)
-1: asparagopsis_armata     (invasive red alga)
-2: botrylloides_violaceus  (invasive colonial tunicate)
-3: hildenbrandia_rubra     (encrusting red alga)
-```
+[![CI](https://github.com/svillhauer/Biofouling_ROV/actions/workflows/ci.yml/badge.svg)](https://github.com/svillhauer/Biofouling_ROV/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)
+![YOLO11-seg](https://img.shields.io/badge/model-YOLO11s--seg-111F68)
+![BlueOS](https://img.shields.io/badge/vehicle-BlueOS%20%2F%20BlueROV-0A72B9)
+![Ping1D](https://img.shields.io/badge/sensor-Ping1D%20echosounder-0A72B9)
 
-## Setup
+<img src="docs/media/hildenbrandia_detection.gif" width="49%" alt="Live detection of Hildenbrandia rubra from the ROV camera stream"/>
+<img src="docs/media/hildenbrandia_detection_2.gif" width="49%" alt="Live segmentation of Hildenbrandia rubra and Botrylloides violaceus from the ROV camera stream"/>
 
-```
-pip install ultralytics opencv-python numpy pandas pyyaml requests tqdm pillow matplotlib
-```
+<sub>Live inference on the ROV's RTSP stream: per-instance masks, species labels and confidence scores, rendered in real time.</sub>
 
-Script 08 also needs `bluerobotics-ping` (`pip install bluerobotics-ping`) to talk to the echosounder.
+</div>
 
-## Workflow
+---
 
-### 1. Extract images from a GBIF download
+> [!NOTE]
+> **Project context.** This repository is the computer-vision subsystem of *Autonomous Detection of Invasive Biofouling*, Team 5's project at the **2026 Marine Robotics Summer School** (MIT Program · University of the Azores, Horta, Faial). The full concept of operations runs from **Identify** (AIS-based screening of incoming vessels) to **Inspect** (an echosounder-standoff ROV images the hull while this model flags invasive species) to **Act** (brush-head sampling and removal). Team: Francisco Silva, Kaitlyn Barros, Sarah Villhauer, Tiago Conceição.
 
-```
-python scripts/01_extract_gbif_images.py /path/to/species.zip --out-subdir <name>
-```
+## Why
 
-Unzips a Darwin Core Archive and downloads the images listed in
-`multimedia.txt` / `occurrence.txt` into `data/images/<name>/`. Use
-`--limit 50` for a quick test run.
+Biofouling on harbor infrastructure and hulls is usually surveyed by divers or by people scrubbing through hours of ROV video afterward. Knowing *that* something is growing isn't enough. Invasive species such as *Rugulopteryx okamurae* or *Botrylloides violaceus* need a different response from native encrusting algae, so the useful output is **which organism, where, and how much**.
 
-### 2. Label
+This project answers that live, during the dive:
 
-```
-python scripts/02_label_tool.py --source images/<name> --class-id <id>
-```
+| Question | How it's answered |
+|---|---|
+| **Is there fouling in view?** | Any class firing above threshold |
+| **Which species?** | 4-class instance segmentation (not a generic "fouling" blob) |
+| **How much?** | Union of instance masks → % of frame, and with echosounder range + camera FOV, m² of wall |
+| **What did the pilot see?** | Masks overlaid on the operator console via WebSocket, plus timestamped CSV logs and annotated MP4 recordings |
 
-SAM-assisted point-and-click labeling. Left-click: positive point.
-Right-click: negative point. SPACE: predict mask. s: accept. b: confirmed
-background. q: quit and autosave. The class ID must match `data.yaml`.
+## Highlights
 
-### 3. Split into train/val/test
+- **Species-level instance segmentation.** Fine-tuned YOLO11s-seg on 4 organisms, with per-instance polygons rather than boxes, so coverage can be measured.
+- **Closing the sim-to-sea domain gap.** The training photos are sharp, well-lit GBIF macro shots, while ROV footage is hazy, blue-green and blurry. A physically motivated degradation pass (detail loss, haze veil, desaturation, colour cast, sensor noise) plus a small set of hand-labelled real ROV frames made small, distant instances detectable. [Details below](#closing-the-domain-gap).
+- **Leakage-safe evaluation.** Splits are grouped by GBIF occurrence record and stratified per class, so near-duplicate photos never straddle train/test and low-data species still get val/test coverage.
+- **SAM-assisted labelling tool.** Point-and-click Segment Anything labelling with multi-instance and multi-class support, undo/back navigation and autosave. It was used to produce the dataset's masks.
+- **Vehicle-integrated runtime.** Topside GPU inference against the BlueOS RTSP stream (TCP transport for tether reliability), a versioned WebSocket protocol for the operator console's AI overlay, and Ping1D range fusion for metric coverage.
+- **Engineering hygiene.** Installable package, unit-tested core logic, ruff-linted, CI on every push.
 
-```
-python scripts/03_split_dataset.py
-```
+## System architecture
 
-Splits each class independently (grouped by GBIF record ID to avoid
-near-duplicate leakage), so low-data classes still get val/test coverage.
-Confirmed-background images are pooled across all classes.
+```mermaid
+flowchart LR
+    subgraph Offline["Offline: dataset & training"]
+        direction TB
+        A[GBIF Darwin Core<br/>archives] -->|extract_gbif_images| B[Species image pools]
+        R[Real ROV frames] --> L
+        B --> L[SAM-assisted<br/>labelling tool]
+        L -->|YOLO-seg polygons| S[Leakage-safe<br/>per-class split]
+        S --> D[ROV domain<br/>degradation]
+        D --> T[YOLO11s-seg<br/>fine-tuning]
+        T --> M[(models/train-4<br/>best.pt)]
+    end
 
-### 4. Train
+    subgraph Vehicle["ROV (BlueOS)"]
+        C[Camera] -->|RTSP / TCP| X
+        P[Ping1D<br/>echosounder] -->|UDP / serial| X
+    end
 
-```
-python scripts/04_train.py --weights yolo11s-seg.pt --epochs 150 --batch 16
-```
+    subgraph Topside["Topside GPU"]
+        X[Live inference] --> W[WebSocket server<br/>protocol v1.0]
+        X --> CSV[(Detection &<br/>coverage CSVs)]
+        X --> MP4[(Annotated MP4)]
+    end
 
-Fine-tunes YOLOv11s-seg from COCO-pretrained weights, with boosted HSV
-augmentation for the underwater color cast. Check
-`runs/segment/<name>/confusion_matrix.png` for species-vs-species confusion.
-
-### 5. Close the ROV domain gap (botrylloides)
-
-GBIF photos are sharp, well-lit macro shots. ROV footage is blurry, hazy,
-and color-cast. That gap is most visible on botrylloides, whose small
-instances went undetected until this was addressed. Two steps close it:
-
-```
-python scripts/06_degrade_domain_match.py --class-ids 2
-```
-
-Generates blurred, hazy, color-cast, noised duplicates of the botrylloides
-training images (train split only, added alongside the originals). Run
-after step 3.
-
-```
-python scripts/02_label_tool.py --source rov_frames --class-id 2
+    M --> X
+    W --> O[Operator console<br/>AI overlay]
+    CSV --> AN[Session analytics<br/>& plots]
 ```
 
-Labels a handful of real ROV photos directly and folds them into training.
-This is the stronger fix: the degraded copies only simulate blur at the
-same scale, not a small, distant instance.
+## Target species
 
-### 6. Scan photos for biofouling
+| ID | Species | Type | Why it matters |
+|:-:|---|---|---|
+| 0 | *Rugulopteryx okamurae* | Brown alga | Highly invasive; rapidly overgrows native benthos |
+| 1 | *Asparagopsis armata* | Red alga | Invasive; forms dense turfs on hard substrate |
+| 2 | *Botrylloides violaceus* | Colonial tunicate | Invasive fouler of hulls, pilings and aquaculture gear |
+| 3 | *Hildenbrandia rubra* | Encrusting red alga | Thin crust that is easy to miss visually; tests fine-texture segmentation |
 
+## Results
+
+Model **`train-4`**: YOLO11s-seg, 640 px, 150 epochs, fine-tuned from COCO weights. Metrics are on the held-out validation split at the best checkpoint (epoch 138).
+
+| Metric | Mask | Box |
+|---|:-:|:-:|
+| mAP@50 | **0.735** | 0.758 |
+| mAP@50–95 | **0.497** | 0.544 |
+| Precision | 0.785 | 0.790 |
+| Recall | 0.705 | 0.712 |
+
+<p align="center">
+  <img src="docs/media/training_curves.png" width="44%" alt="Mask mAP and loss over training"/>
+  &nbsp;
+  <img src="docs/media/confusion_matrix.png" width="52%" alt="Normalized confusion matrix"/>
+</p>
+
+**Dataset:** 765 unique labelled images (1,074 instance masks, including 19 confirmed-background negatives), expanded with 457 ROV-degraded training copies.
+
+| Split | Images | Notes |
+|---|:-:|---|
+| train | 1,043 | 586 originals + 457 ROV-degraded copies |
+| val | 106 | untouched originals |
+| test | 73 | untouched originals |
+
+**Reading the confusion matrix:** cross-species confusion is close to zero, so when the model fires it nearly always names the right organism. The dominant error is *missed detection* (true organism predicted as background). That is most pronounced for *Hildenbrandia rubra*, a thin crust whose texture blends into bare rock. The fix is more real-footage labels rather than more architecture.
+
+Full Ultralytics outputs (PR/F1 curves, label stats, val batch predictions) are in [`models/train-4/`](models/train-4).
+
+## Closing the domain gap
+
+Most of the engineering effort went here. GBIF photos are in-air or tidepool macro shots, while the deployment target is turbid harbor water seen through an ROV camera. An early model trained on GBIF photos alone fired on only **1 of 13** real ROV photos.
+
+<details>
+<summary><b>What worked, what didn't, and why</b></summary>
+
+&nbsp;
+
+1. **Global blur/noise augmentation: tried, rejected.** Heavy Albumentations degradation during training raised ROV detections from 1/13 to 10/13. Visual inspection showed the new "detections" were masking *smooth open water between rocks*. Degraded positives vastly outnumbered degraded negatives, so the model had learned **blur ⇒ organism**. The code is kept behind `--quality-degrade` (off by default) as a documented negative result.
+
+2. **Offline, physically motivated degradation, with negatives degraded in lockstep.** [`degrade_domain_match.py`](scripts/data/degrade_domain_match.py) writes ROV-like copies of training images (train split only):
+   - down/up-scale round-trip + Gaussian blur → loss of fine detail
+   - saturation and contrast reduction → muted underwater light
+   - a blurred, tinted *haze veil* blended over the image → colour cast that varies with scene content rather than a flat tint
+   - Gaussian sensor/turbidity noise
+
+   Confirmed-background images are degraded at the same rate, which keeps the positive:negative ratio intact and prevents the shortcut from step 1. Every transform is photometric or a same-size resize round-trip, so normalized polygon labels stay valid unchanged.
+
+3. **Labelling real ROV frames directly.** The strongest fix. Degraded copies simulate blur at the *same* object scale, but real footage also has *small, distant* instances. Even a handful of hand-labelled ROV frames (five so far), folded into training with the same labelling tool, starts to cover that, and it's the main lever for future gains.
+
+4. **Colour-invariance via HSV augmentation.** Hue/saturation/value jitter is raised above the YOLO defaults to cope with the strong blue-green cast.
+
+</details>
+
+## Quickstart
+
+```bash
+git clone https://github.com/svillhauer/Biofouling_ROV.git
+cd Biofouling_ROV
+pip install -e .            # core: ultralytics, opencv, numpy, ...
+pip install -e ".[rov]"     # + Ping1D echosounder & WebSocket server for live ROV use
 ```
-python scripts/05_scan_for_biofouling.py --weights runs/segment/train-4/weights/best.pt --source rov_photos --save
+
+Scan a folder of images or a video with the bundled model:
+
+```bash
+python scripts/inference/scan_images.py --source path/to/rov_photos --save
 ```
 
-Reports per image whether biofouling was detected, which species, and
-confidence, plus an overall summary. `--save` writes annotated copies.
-Oversized images are automatically downscaled before mask rendering to
-avoid a GPU out-of-memory error.
-
-### 7. Live scan from a BlueOS video stream
-
-```
-python scripts/07_live_scan.py --source rtsp://192.168.2.2:8554/video --weights runs/segment/train-4/weights/best.pt
+```text
+image                                     fouling?   species (max confidence)
+--------------------------------------------------------------------------------
+3.png                                     YES        hildenbrandia_rubra (0.97), botrylloides_violaceus (0.78)
+3 images scanned, 3 had biofouling detected (100.0%)
 ```
 
-Runs the model over a live RTSP stream, meant to run topside on a GPU
-machine rather than on the ROV's own companion computer. Shows an
-annotated preview window and logs every detection (timestamp, species,
-confidence) to a CSV. Use `--source 0` to test against a local webcam
-first, and `--no-display` for a headless run. Press q in the preview
-window (or Ctrl+C in the terminal) to stop.
+## Live ROV deployment
 
-Find the stream URL in the BlueOS web UI under Video Manager: set up an
-RTSP (or other cv2-readable) output for the camera you want, then pass
-that URL as `--source`.
+Inference runs **topside** on a GPU laptop, not on the vehicle's companion computer, so it uses the full-size model with no export or quantization. The stream URL comes from BlueOS → *Video Manager*.
 
-### 8. Live scan with percent coverage (echosounder)
+```bash
+# 1. Operator-console overlay: WebSocket server + timestamped CSV log + annotated MP4
+python scripts/inference/live_scan_ws.py --source rtsp://192.168.2.2:8554/video_udp_stream_0 --record
 
-```
-python scripts/08_scan_with_coverage.py --source rtsp://192.168.2.2:8554/video \
+# 2. Metric coverage: fuse Ping1D range to convert % of frame into m² of wall
+python scripts/inference/live_scan_coverage.py --source rtsp://192.168.2.2:8554/video \
     --ping-udp 192.168.2.2:9092 --hfov 80 --vfov 64
+
+# 3. Minimal: local preview window + CSV log (use --source 0 to smoke-test on a webcam)
+python scripts/inference/live_scan.py --source rtsp://192.168.2.2:8554/video
 ```
 
-Same as script 07, but reads range from a Blue Robotics Ping1D echosounder
-(directly via `brping`, over `--ping-udp host:port` or `--ping-serial
-device`) and logs a percent-of-frame coverage figure for every frame to a
-second CSV (`--coverage-log`, default `runs/coverage_log.csv`). Percent
-coverage itself doesn't need range to compute, it's already a fraction of
-whatever's in view; range is used to also convert that into an absolute
-area in m² if you pass `--hfov`/`--vfov` (your camera's field of view in
-degrees), and is logged either way so distant, less-reliable frames can be
-filtered out later.
+<details>
+<summary><b>WebSocket protocol (v1.0)</b></summary>
 
-This gives one coverage number per frame, not a whole-wall survey figure:
-overlapping frames from the same pass aren't de-duplicated, so summing
-`covered_area_m2` across frames will double-count anything seen twice.
+&nbsp;
 
-## Layout
+Served at `ws://<host>:8765/api/v1/detections/ws`. Clients receive a `hello` on connect, then one `detections` message per frame and a `heartbeat` (with measured FPS) once a second.
 
+```json
+{
+  "protocol_version": "1.0",
+  "type": "detections",
+  "timestamp": 1752680131.42,
+  "frame_id": 84,
+  "image_width": 1920,
+  "image_height": 1080,
+  "detection_count": 1,
+  "detections": [
+    {
+      "class_id": 3,
+      "class_name": "hildenbrandia_rubra",
+      "confidence": 0.8979,
+      "bbox": { "format": "xyxy_pixels", "x1": 681.5, "y1": 0.0, "x2": 1917.4, "y2": 1076.7 },
+      "polygon": { "points": [[0.355, 0.0], [0.998, 0.0], [0.998, 0.997]] }
+    }
+  ]
+}
 ```
-data/
-  images/<name>/     source photos per species, from GBIF
-  rov_frames/        real ROV/underwater frames for direct labeling
-  labels_yolo_seg/   YOLO-seg polygon labels
-  dataset/           final train/val/test split, YOLO layout
-scripts/
-  01_extract_gbif_images.py
-  02_label_tool.py
-  03_split_dataset.py
-  04_train.py
-  05_scan_for_biofouling.py
-  06_degrade_domain_match.py
-  07_live_scan.py
-  08_scan_with_coverage.py
-data.yaml   dataset config, 4 classes
-runs/       training outputs
+
+Polygon points are normalized `[0, 1]`. Inference runs on a worker thread and fans messages out to every connected console through the asyncio loop, so a slow client never stalls the model.
+
+</details>
+
+<details>
+<summary><b>How coverage is computed</b></summary>
+
+&nbsp;
+
+Per frame, the union of all instance masks gives **% of frame covered**. That figure is scale-independent and needs no range. With the Ping1D distance *d* and the camera FOV, the visible wall patch is
+
+$$A_{\text{frame}} = \left(2d\tan\tfrac{\text{HFOV}}{2}\right)\left(2d\tan\tfrac{\text{VFOV}}{2}\right)$$
+
+so covered area = % coverage × *A*<sub>frame</sub>. Range and range-confidence are logged with every reading, so distant, less reliable frames can be filtered afterward. See [`biofouling/geometry.py`](src/biofouling/geometry.py) and its tests.
+
+</details>
+
+## Training pipeline
+
+Reproduce the model end to end. Each step is a standalone CLI; run any of them with `--help` for all options.
+
+| # | Step | Command |
+|:-:|---|---|
+| 1 | Download species images from a GBIF export | `python scripts/data/extract_gbif_images.py species.zip --out-subdir <name>` |
+| 2 | Label with SAM (click → `SPACE` predict → `s` accept) | `python scripts/data/label_tool.py --source images/<name> --class-id <id>` |
+| 3 | Leakage-safe per-class train/val/test split | `python scripts/data/split_dataset.py` |
+| 4 | Add ROV-degraded training copies | `python scripts/data/degrade_domain_match.py` |
+| 5 | Fine-tune YOLO11s-seg | `python scripts/train/train.py --weights yolo11s-seg.pt --epochs 150` |
+| 6 | Presentation-quality training figures | `python scripts/train/plot_training_summary.py` |
+| 7 | Plot a recorded field session | `python scripts/analysis/plot_session.py --log <session.csv>` |
+
+Class definitions live in [`configs/data.yaml`](configs/data.yaml). Labels are versioned in `data/`, while the raw images are regenerated from GBIF (step 1) rather than committed.
+
+## Repository layout
+
+```text
+Biofouling_ROV/
+├── configs/
+│   └── data.yaml                 # dataset paths & class map
+├── src/biofouling/               # shared, unit-tested library code
+│   ├── paths.py                  #   canonical repo paths
+│   ├── species.py                #   display names & colour palette
+│   ├── geometry.py               #   mask area, FOV footprint, m² coverage
+│   ├── dataset.py                #   grouped, stratified splitting
+│   ├── yolo_format.py            #   YOLO-seg label (de)serialization
+│   ├── gbif.py                   #   robust parsing of ragged GBIF exports
+│   └── plotting.py               #   shared figure style
+├── scripts/
+│   ├── data/                     # ingest → label → split → degrade
+│   ├── train/                    # training & training figures
+│   ├── inference/                # offline scan, live scan, coverage, WebSocket server
+│   └── analysis/                 # field-session plots
+├── models/train-4/               # released weights + full training artifacts
+├── data/
+│   ├── labels_yolo_seg/          # hand-labelled polygons (source of truth)
+│   └── dataset/labels/           # resolved train/val/test split
+├── results/field_sessions/       # live-scan detection logs & plots from ROV runs
+├── docs/media/                   # README figures
+└── tests/                        # pytest suite (runs in CI without a GPU)
 ```
+
+## Development
+
+```bash
+pip install -e ".[dev]"
+pytest          # unit tests for geometry, splitting, label I/O, GBIF parsing
+ruff check .    # lint
+```
+
+CI runs lint and tests on Python 3.10 and 3.12 for every push. The tested core depends only on NumPy, so CI never has to install the CUDA/PyTorch stack.
+
+## Limitations & roadmap
+
+- **Coverage is per-frame, not per-survey.** Overlapping frames are not de-duplicated, so summing m² double-counts. Next step: register frames along the survey track (visual odometry + DVL / echosounder) into a mosaic and compute coverage once per wall patch.
+- **Validation is mostly GBIF imagery.** A held-out set of *real ROV footage* is the right benchmark for deployment performance and is the top data priority.
+- **Missed detections dominate the error budget**, especially for thin encrusting *Hildenbrandia*. More ROV-domain labels and higher-resolution tiling for small instances are the planned fixes.
+- **On-vehicle inference.** Exporting to TensorRT/ONNX for a Jetson-class companion computer would remove the topside GPU and tether-bandwidth dependency.

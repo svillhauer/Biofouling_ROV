@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """
-Generates presentation-ready PNG figures from a 09_live_scan_ws.py detection
+Generates presentation-ready PNG figures from a live_scan_ws.py detection
 log (timestamp, frame_id, species, confidence, x1, y1, x2, y2, image_width,
 image_height, mask_area_px2).
 
 Usage:
-    python scripts/10_plot_presentation.py
-    python scripts/10_plot_presentation.py --log runs/live_scan_ws_log.csv --out runs/plots
+    python scripts/analysis/plot_session.py --log results/field_sessions/live_scan_ws_log_20260716_153522.csv
 """
 import argparse
 import csv
@@ -16,42 +15,17 @@ from datetime import datetime
 from pathlib import Path
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 
-ROOT = Path(__file__).resolve().parent.parent
+from biofouling.paths import RUNS_DIR
+from biofouling.plotting import GRID, INK, MUTED, SECONDARY_INK, apply_style
+from biofouling.species import COLORS
+from biofouling.species import DISPLAY_NAMES as LABELS
 
-# Validated categorical palette (blue/green/magenta/yellow slots 1-4), light-mode steps.
-COLORS = {
-    "botrylloides_violaceus": "#2a78d6",
-    "hildenbrandia_rubra": "#008300",
-    "asparagopsis_armata": "#e87ba4",
-    "rugulopteryx_okamurae": "#eda100",
-}
-LABELS = {
-    "botrylloides_violaceus": "Botrylloides violaceus",
-    "hildenbrandia_rubra": "Hildenbrandia rubra",
-    "asparagopsis_armata": "Asparagopsis armata",
-    "rugulopteryx_okamurae": "Rugulopteryx okamurae",
-}
-INK = "#0b0b0b"
-SECONDARY_INK = "#52514e"
-MUTED = "#898781"
-GRID = "#e1e0d9"
-
-plt.rcParams.update({
-    "font.family": "sans-serif",
-    "font.size": 12,
-    "text.color": INK,
-    "axes.edgecolor": MUTED,
-    "axes.labelcolor": SECONDARY_INK,
-    "xtick.color": SECONDARY_INK,
-    "ytick.color": SECONDARY_INK,
-    "figure.facecolor": "white",
-    "axes.facecolor": "white",
-    "savefig.facecolor": "white",
-})
+apply_style()
 
 
 def load_rows(log_path):
@@ -211,7 +185,7 @@ def print_conclusion(rows, species):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--log", required=True,
-                     help="Path to a 09_live_scan_ws.py CSV log, e.g. runs/live_scan_ws_log_20260716_133454.csv "
+                     help="Path to a live_scan_ws.py CSV log, e.g. runs/live_scan_ws_log_20260716_133454.csv "
                           "- each recording session gets its own timestamped log, so pick the one you want plotted.")
     ap.add_argument("--out",
                      help="Output directory for the PNGs. Defaults to runs/plots/<session timestamp>/, "
@@ -223,7 +197,7 @@ def main():
         out_dir = Path(args.out)
     else:
         session_suffix = log_path.stem.replace("live_scan_ws_log_", "").replace("live_scan_ws_log", "latest")
-        out_dir = ROOT / "runs" / "plots" / session_suffix
+        out_dir = RUNS_DIR / "plots" / session_suffix
     out_dir.mkdir(parents=True, exist_ok=True)
 
     rows = load_rows(log_path)

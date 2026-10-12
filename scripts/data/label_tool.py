@@ -20,22 +20,20 @@ already-labeled other-class instances are shown as a cyan outline for
 spatial context.
 
 Usage:
-    python scripts/02_label_tool.py
-    python scripts/02_label_tool.py --source rov_frames   # label ROV frames instead
-    python scripts/02_label_tool.py --model mobile_sam.pt  # faster, lower quality
-    python scripts/02_label_tool.py --source images/aa --class-id 1  # label AA instances
-                                                                      # for the false-positive
-                                                                      # check, not for training
+    python scripts/data/label_tool.py --source images/<species> --class-id <id>
+    python scripts/data/label_tool.py --source rov_frames --class-id 2   # real ROV frames
+    python scripts/data/label_tool.py --model mobile_sam.pt              # faster, lower quality
 """
 import argparse
 import random
-from pathlib import Path
 
 import cv2
 import numpy as np
 from ultralytics import SAM
 
-ROOT = Path(__file__).resolve().parent.parent
+from biofouling.paths import DATA_DIR, LABELS_DIR
+from biofouling.yolo_format import parse_yolo_seg_line, to_yolo_seg_line
+
 MAX_DISPLAY = (1280, 900)
 
 state = {
@@ -127,21 +125,6 @@ def draw_overlay():
     return disp
 
 
-def to_yolo_seg_line(poly_orig, w, h, class_id):
-    coords = []
-    for x, y in poly_orig:
-        coords.append(min(max(x / w, 0.0), 1.0))
-        coords.append(min(max(y / h, 0.0), 1.0))
-    return str(class_id) + " " + " ".join(f"{c:.6f}" for c in coords)
-
-
-def parse_yolo_seg_line_poly(line, w, h):
-    parts = line.split()
-    coords = [float(v) for v in parts[1:]]
-    pts = [[coords[i] * w, coords[i + 1] * h] for i in range(0, len(coords), 2)]
-    return np.array(pts, dtype=np.float32)
-
-
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--source", default="images/all",
@@ -149,16 +132,13 @@ def main():
     ap.add_argument("--model", default="sam_b.pt",
                     help="SAM checkpoint: sam_b.pt (better) or mobile_sam.pt (faster)")
     ap.add_argument("--class-id", type=int, default=0,
-                    help="Class index to write for every instance labeled this run. "
-                         "0=rugulopteryx_okamurae is the only trained class (see data.yaml); "
-                         "1=asparagopsis_armata is a look-alike used only for the "
-                         "false-positive check (scripts/05_check_false_positives.py), "
-                         "never fed into training")
+                    help="Class index to write for every instance labeled this run "
+                         "(see configs/data.yaml for the class list)")
     ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args()
 
-    img_dir = ROOT / "data" / args.source
-    label_dir = ROOT / "data" / "labels_yolo_seg"
+    img_dir = DATA_DIR / args.source
+    label_dir = LABELS_DIR
     label_dir.mkdir(parents=True, exist_ok=True)
     progress_file = label_dir / "_progress.txt"
 
@@ -213,7 +193,7 @@ def main():
                     continue
                 if line.split()[0] != str(args.class_id):
                     other_lines.append(line)
-                    other_polys.append(parse_yolo_seg_line_poly(line, w, h))
+                    other_polys.append(parse_yolo_seg_line(line, w, h))
 
         state.update(img_orig=img_orig, img_disp=disp, scale=scale,
                      points_disp=[], labels=[], mask_poly_orig=None, accepted_polys=[],
@@ -222,7 +202,7 @@ def main():
         instances_this_image = 0
         lines = []
 
-        def write_label():
+        def write_label(label_path=label_path, other_lines=other_lines, lines=lines):
             all_lines = other_lines + lines
             label_path.write_text("\n".join(all_lines) + "\n" if all_lines else "")
 

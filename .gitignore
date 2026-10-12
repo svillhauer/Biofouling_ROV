@@ -1,33 +1,29 @@
-# Datasets (large, GBIF-sourced/regeneratable via scripts/01, 03, 06)
-# Labels are kept - small text files, real annotation work.
+# --- Data -------------------------------------------------------------------
+# Raw images are GBIF-sourced and regenerable (scripts/data/extract_gbif_images.py,
+# split_dataset.py, degrade_domain_match.py). Labels are kept: small text files,
+# real annotation work.
 data/*
 !data/labels_yolo_seg/
 !data/dataset/
-
 data/dataset/*
 !data/dataset/labels/
+*.cache
 
 rov_photos/
 
-# Pretrained base checkpoints (auto-downloaded by ultralytics)
-yolo11n-seg.pt
-yolo11s-seg.pt
-yolo26n.pt
-sam_b.pt
+# --- Models & outputs -------------------------------------------------------
+# Base checkpoints are auto-downloaded by ultralytics
+/*.pt
+# Scratch output from training, scans, live sessions and plots
+runs/
 
-# Misc local test assets
-fish.mp4
+# --- Local assets -----------------------------------------------------------
+*.mp4
 
-# Training runs - keep only train-4
-runs/*
-!runs/segment
-runs/segment/*
-!runs/segment/train-4
-
-# Live-scan detection logs worth keeping
-!runs/live_scan_ws_log_20260716_154434.csv
-!runs/live_scan_ws_log_20260716_153522.csv
-
-# Python
-scripts/__pycache__/
-*.pyc
+# --- Python -----------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/

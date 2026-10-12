@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Same live-scan loop as 07_live_scan.py, plus a per-frame percent-coverage
+Same live-scan loop as live_scan.py, plus a per-frame percent-coverage
 metric using range from a Blue Robotics Ping1D echosounder (read directly
 over its own connection via brping, not through ArduSub/MAVLink).
 
@@ -19,22 +19,22 @@ frames along a survey track into one non-overlapping estimate is a separate,
 harder problem for later.
 
 Usage:
-    python scripts/08_scan_with_coverage.py --source rtsp://192.168.2.2:8554/video \\
+    python scripts/inference/live_scan_coverage.py --source rtsp://192.168.2.2:8554/video \\
         --ping-udp 192.168.2.2:9092 --hfov 80 --vfov 64
-    python scripts/08_scan_with_coverage.py --source 0 --ping-serial /dev/ttyUSB0
+    python scripts/inference/live_scan_coverage.py --source 0 --ping-serial /dev/ttyUSB0
 Press 'q' in the preview window (or Ctrl+C in the terminal) to stop.
 """
 import argparse
 import csv
-import math
 from datetime import datetime
 from pathlib import Path
 
 import cv2
-from ultralytics import YOLO
 from brping import Ping1D
+from ultralytics import YOLO
 
-ROOT = Path(__file__).resolve().parent.parent
+from biofouling.geometry import covered_area_m2
+from biofouling.paths import DEFAULT_WEIGHTS, RUNS_DIR
 
 
 def connect_ping(args) -> Ping1D:
@@ -62,11 +62,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--source", required=True,
                      help="RTSP URL from BlueOS's Video Manager, or a webcam index (e.g. 0) for testing")
-    ap.add_argument("--weights", default=str(ROOT / "runs/segment/train-4/weights/best.pt"))
+    ap.add_argument("--weights", default=str(DEFAULT_WEIGHTS))
     ap.add_argument("--conf", type=float, default=0.25)
-    ap.add_argument("--log", default=str(ROOT / "runs" / "live_scan_log.csv"),
-                     help="Per-detection CSV, same format as 07_live_scan.py plus range_m")
-    ap.add_argument("--coverage-log", default=str(ROOT / "runs" / "coverage_log.csv"),
+    ap.add_argument("--log", default=str(RUNS_DIR / "live_scan_log.csv"),
+                     help="Per-detection CSV, same format as live_scan.py plus range_m")
+    ap.add_argument("--coverage-log", default=str(RUNS_DIR / "coverage_log.csv"),
                      help="Per-frame percent-coverage CSV")
     ap.add_argument("--no-display", action="store_true",
                      help="Skip the live preview window - log detections only (for a headless run)")
@@ -133,16 +133,14 @@ def main():
             else:
                 percent_coverage = 0.0
 
-            covered_area_m2 = ""
+            area_m2 = ""
             if range_m is not None and args.hfov and args.vfov:
-                frame_w_m = 2 * range_m * math.tan(math.radians(args.hfov / 2))
-                frame_h_m = 2 * range_m * math.tan(math.radians(args.vfov / 2))
-                covered_area_m2 = f"{(percent_coverage / 100) * frame_w_m * frame_h_m:.4f}"
+                area_m2 = f"{covered_area_m2(percent_coverage, range_m, args.hfov, args.vfov):.4f}"
 
             cov_writer.writerow([ts, num_dets, f"{percent_coverage:.2f}",
                                   f"{range_m:.3f}" if range_m is not None else "",
                                   range_conf if range_conf is not None else "",
-                                  covered_area_m2])
+                                  area_m2])
             cov_file.flush()
 
             if not args.no_display:

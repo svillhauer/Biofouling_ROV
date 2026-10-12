@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-Trains a multi-class YOLOv11-seg biofouling detector on data.yaml (one class
-per organism - see data.yaml). Sized for an 8GB GPU by default.
+Trains a multi-class YOLOv11-seg biofouling detector on configs/data.yaml
+(one class per organism). Sized for an 8GB GPU by default.
 
 Initial training on GBIF images:
-    python scripts/04_train.py
+    python scripts/train/train.py
 
 Fine-tuning a trained model on newly-added ROV frames (small dataset, low LR
 so it adapts to the underwater domain without forgetting what it learned from
 the larger GBIF set):
-    python scripts/04_train.py --weights runs/segment/train/weights/best.pt \\
+    python scripts/train/train.py --weights models/train-4/weights/best.pt \\
         --epochs 50 --lr0 0.001 --name finetune_rov
 
 Image-quality degradation augmentation (--quality-degrade to enable, OFF by
@@ -26,11 +26,10 @@ worth revisiting with gentler settings - but real labeled ROV frames are the
 more reliable fix once available, not further tuning of this.
 """
 import argparse
-from pathlib import Path
 
 from ultralytics import YOLO
 
-ROOT = Path(__file__).resolve().parent.parent
+from biofouling.paths import DATA_YAML, RUNS_DIR
 
 
 def enable_quality_degradation():
@@ -72,7 +71,7 @@ def main():
     ap.add_argument("--weights", default="yolo11s-seg.pt",
                     help="Starting weights: yolo11n/s/m-seg.pt for fresh training, "
                          "or a previous best.pt to fine-tune")
-    ap.add_argument("--data", default=str(ROOT / "data.yaml"))
+    ap.add_argument("--data", default=str(DATA_YAML))
     ap.add_argument("--epochs", type=int, default=150)
     ap.add_argument("--imgsz", type=int, default=640)
     ap.add_argument("--batch", type=int, default=16)
@@ -104,7 +103,7 @@ def main():
         lr0=args.lr0,
         patience=args.patience,
         name=args.name,
-        project=str(ROOT / "runs" / "segment"),
+        project=str(RUNS_DIR / "segment"),
         hsv_h=args.hsv_h,
         hsv_s=args.hsv_s,
         hsv_v=args.hsv_v,

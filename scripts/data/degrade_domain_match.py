@@ -10,39 +10,37 @@ reduced saturation/contrast, color-cast, noise) of the existing training
 images, added alongside the originals so the model sees both conditions.
 
 The degrade() parameters below are the ones used to produce the training
-data for runs/segment/train-4 (recovered from a stale __pycache__ copy
+data for models/train-4 (recovered from a stale __pycache__ copy
 after the function was later edited and the on-disk _degr images had
 already been regenerated with the newer, lighter parameters - if you
 re-tune these again, keep a copy of what train-4 actually used).
 
 Confirmed-background (empty-label) images are degraded too, alongside
 whichever classes are targeted, at the same rate. This matters: an earlier,
-unrelated experiment (see scripts/04_train.py's --quality-degrade, now
+unrelated experiment (see scripts/train/train.py's --quality-degrade, now
 disabled by default) applied heavy blur/noise augmentation globally during
 training and it taught the model to associate blur itself with "organism
 present," because degraded positives vastly outnumbered degraded negatives.
 Degrading backgrounds in lockstep here keeps that ratio intact.
 
 Only touches data/dataset/images/train + data/dataset/labels/train (never
-val/test) - run this AFTER scripts/03_split_dataset.py. Labels are copied
+val/test) - run this AFTER scripts/data/split_dataset.py. Labels are copied
 unchanged since every transform here is purely photometric or a resize
 round-trip back to the original dimensions, so polygon coordinates
 (normalized 0-1) stay valid.
 
 Usage:
-    python scripts/06_degrade_domain_match.py
-    python scripts/06_degrade_domain_match.py --class-ids 2 --suffix _degr
+    python scripts/data/degrade_domain_match.py
+    python scripts/data/degrade_domain_match.py --class-ids 2 --suffix _degr
 """
 import argparse
 import shutil
-from pathlib import Path
 
 import cv2
 import numpy as np
 import yaml
 
-ROOT = Path(__file__).resolve().parent.parent
-DATASET_DIR = ROOT / "data" / "dataset"
+from biofouling.paths import DATA_YAML, DATASET_DIR, ROV_FRAMES_DIR
 
 
 def degrade(img: np.ndarray, rng: np.random.Generator) -> np.ndarray:
@@ -101,13 +99,12 @@ def main():
     args = ap.parse_args()
     target_classes = set(args.class_ids.split(","))
 
-    data_yaml = yaml.safe_load((ROOT / "data.yaml").read_text())
+    data_yaml = yaml.safe_load(DATA_YAML.read_text())
     class_names = data_yaml["names"]
 
     img_dir = DATASET_DIR / "images" / "train"
     lbl_dir = DATASET_DIR / "labels" / "train"
-    rov_frames_dir = ROOT / "data" / "rov_frames"
-    rov_stems = {p.stem for p in rov_frames_dir.iterdir()} if rov_frames_dir.exists() else set()
+    rov_stems = {p.stem for p in ROV_FRAMES_DIR.iterdir()} if ROV_FRAMES_DIR.exists() else set()
 
     rng = np.random.default_rng(args.seed)
     made = 0
@@ -118,8 +115,8 @@ def main():
         if lbl_path.stem in rov_stems:
             continue  # already real ROV footage - no need to simulate the domain gap
 
-        lines = [l for l in lbl_path.read_text().splitlines() if l.strip()]
-        classes = {l.split()[0] for l in lines}
+        lines = [ln for ln in lbl_path.read_text().splitlines() if ln.strip()]
+        classes = {ln.split()[0] for ln in lines}
         is_background = not classes
         if not is_background and not (classes & target_classes):
             continue

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Splits labeled images into data/dataset/{images,labels}/{train,val,test} in
-YOLO format, for a multi-class biofouling detector (see data.yaml for the
+YOLO format, for a multi-class biofouling detector (see configs/data.yaml for the
 current class list - one class per organism).
 
 Every species is a real trainable class here (unlike the single-species +
@@ -23,22 +23,17 @@ negative examples for every class alike, not tied to whichever folder they
 happened to be downloaded into.
 
 Usage:
-    python scripts/03_split_dataset.py
-    python scripts/03_split_dataset.py --val-frac 0.15 --test-frac 0.1
+    python scripts/data/split_dataset.py
+    python scripts/data/split_dataset.py --val-frac 0.15 --test-frac 0.1
 """
 import argparse
-import random
 import shutil
-from pathlib import Path
 from collections import defaultdict
 
 import yaml
 
-ROOT = Path(__file__).resolve().parent.parent
-LABELS_DIR = ROOT / "data" / "labels_yolo_seg"
-DATASET_DIR = ROOT / "data" / "dataset"
-IMAGES_DIR = ROOT / "data" / "images"
-ROV_FRAMES_DIR = ROOT / "data" / "rov_frames"
+from biofouling.dataset import group_key, stratified_split
+from biofouling.paths import DATA_YAML, DATASET_DIR, IMAGES_DIR, LABELS_DIR, ROV_FRAMES_DIR
 
 
 def source_dirs():
@@ -59,29 +54,6 @@ def find_image(stem: str, dirs):
     return None
 
 
-def group_key(stem: str) -> str:
-    # gbifID_<index> -> group by gbifID so near-duplicate photos of the same
-    # occurrence record stay together in one split.
-    return stem.split("_")[0]
-
-
-def stratified_split(groups: dict, val_frac: float, test_frac: float, seed: int):
-    """Splits one class's (or pool's) grouped (img, lbl) pairs into train/val/test."""
-    keys = list(groups.keys())
-    random.Random(seed).shuffle(keys)
-    n = len(keys)
-    n_val = max(1, int(n * val_frac)) if n > 3 else 0
-    n_test = max(1, int(n * test_frac)) if n > 5 else 0
-    val_keys = set(keys[:n_val])
-    test_keys = set(keys[n_val:n_val + n_test])
-
-    out = {"train": [], "val": [], "test": []}
-    for k in keys:
-        split = "val" if k in val_keys else "test" if k in test_keys else "train"
-        out[split].extend(groups[k])
-    return out
-
-
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--val-frac", type=float, default=0.15)
@@ -91,7 +63,7 @@ def main():
                      help="Symlink instead of copy (saves disk space)")
     args = ap.parse_args()
 
-    data_yaml = yaml.safe_load((ROOT / "data.yaml").read_text())
+    data_yaml = yaml.safe_load(DATA_YAML.read_text())
     class_names = data_yaml["names"]
 
     label_files = sorted(LABELS_DIR.glob("*.txt"))
@@ -110,8 +82,8 @@ def main():
         if img is None:
             missing.append(lp.stem)
             continue
-        lines = [l for l in lp.read_text().splitlines() if l.strip()]
-        classes = {l.split()[0] for l in lines}
+        lines = [ln for ln in lp.read_text().splitlines() if ln.strip()]
+        classes = {ln.split()[0] for ln in lines}
         if not classes:
             bg_groups[group_key(lp.stem)].append((img, lp))
             continue
@@ -175,7 +147,7 @@ def main():
         class_counts = defaultdict(int)
         n_empty = 0
         for _, lbl in pairs:
-            lines = [l for l in lbl.read_text().splitlines() if l.strip()]
+            lines = [ln for ln in lbl.read_text().splitlines() if ln.strip()]
             if not lines:
                 n_empty += 1
             for line in lines:
